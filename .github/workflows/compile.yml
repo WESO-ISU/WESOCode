@@ -15,3 +15,5 @@ jobs:
         with:
           sketch-paths: |
             ./WESO26_Code
+          libraries: |
+            - name: Servo
