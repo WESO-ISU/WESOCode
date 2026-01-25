@@ -15,5 +15,7 @@ jobs:
         with:
           sketch-paths: |
             ./WESO26_Code
+          libraries: |
+            - name: Servo
           verbose: true
           enable-warnings-report: true
