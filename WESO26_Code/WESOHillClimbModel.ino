@@ -132,6 +132,8 @@ float readVoltage() {
   for (int i = 0; i < numReadings; i++) {
     sum += voltageReadings[i];
   }
+
+  readIndex++;
   
   return sum / numReadings;
 }
@@ -148,7 +150,7 @@ float readCurrent() {
     sum += currentReadings[i];
   }
   
-  readIndex++; // Increment once at end
+  readIndex++;
   
   return sum / numReadings;
 }
