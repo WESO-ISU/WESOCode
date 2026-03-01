@@ -104,3 +104,5 @@ int change_load_resistence(float resistance);
 //How will we represent the data recorded during our testing time? 
 
 // Table | RPM | voltage | current | 
+
+//PRINT OUT ALL FUNCTIONS IN A CSV FORMAT.
