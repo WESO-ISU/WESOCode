@@ -1,0 +1,41 @@
+//E-stop states methods
+
+void e_stop(); //change linear actuator to the stopping angle. 
+
+//Start-up state methods
+
+//Active reading state methods
+
+//Load change state methods
+
+//Hill slimber state methods 
+
+//Idle state methods
+
+//Data collection methods
+
+void record_rpm(); // write to sd card 
+void record_voltage();
+void record_current();
+void record_windspeed(); //if pitot tube is here n all set up. 
+
+
+//Methods used in multiple different states
+
+float get_voltage();
+float get_current();
+float get_rpm(); //probably could just be an int
+float get_windspeed();
+
+
+//State transition methods
+
+
+//All random methods to be sorted later
+
+int change_load_resistence();
+
+
+
+//How will we represent the data recorded during our testing time?
+Table | RPM | voltage | current | 
