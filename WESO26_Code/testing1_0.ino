@@ -1,3 +1,4 @@
+//NEED TO KNOW SPECIFIC LIBRARIES TO USE FOR EACH COMPONENT.
 int LOAD_PIN1 = 2;
 int LOAD_PIN2 = 3;
 int LOAD_PIN3 = 4;
@@ -19,7 +20,8 @@ int ESTOP_WRITE_PIN = 22;
 int ESTOP_READ_PIN = 23;
 
 void setup() {
-
+  pinMode(IR_PIN, INPUT);
+  Serial.begin(9600);
 }
 
 
@@ -38,7 +40,7 @@ void e_stop(); //change linear actuator to the stopping angle.
 //Active reading state methods 
 void active_reading();
 
-void set_pitch_angle(); //Requires analogWrite()
+void set_pitch_angle(float angle); //Requires analogWrite()
 
 //Load change state methods 
   
@@ -75,7 +77,36 @@ float get_voltage();
 
 float get_current(); 
 
-float get_rpm(); //probably could just be an int 
+int lastState = HIGH;
+unsigned long pulseTimes[5];
+int pulseIndex = 0;
+bool bufferFull = false;
+int NUM_BLADES = 5;
+
+float get_rpm() {
+  int sensorVal = digitalRead(IR_PIN);
+
+  if (lastState == HIGH && sensorVal == LOW) {
+    unsigned long now = micros();
+    pulseTimes[pulseIndex] = now;
+    pulseIndex = (pulseIndex + 1) % NUM_BLADES;
+    if (pulseIndex == 0) bufferFull = true;
+  }
+
+  lastState = sensorVal;
+
+  if (!bufferFull) return 0.0;
+
+  int oldest = pulseIndex;
+  int newest = (pulseIndex + NUM_BLADES - 1) % NUM_BLADES;
+
+  unsigned long revTime_us = pulseTimes[newest] - pulseTimes[oldest];
+
+  if (revTime_us == 0) return 0.0;
+
+  float revTime_sec = revTime_us / 1000000.0;
+  return 60.0 / revTime_sec;
+}
 
 float get_windspeed(); 
 
