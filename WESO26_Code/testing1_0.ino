@@ -95,6 +95,12 @@ void handle_actuator_buttons(){
     }
 }
 
+void handle_actuator_write(int write_value){
+    if(is_legal_la_write(write_value)){
+        linearActuator.write(write_value);
+    }
+}
+
 bool is_legal_la_step(int step_size){
     return !(la_current_position + step_size > LA_EXTEND || la_current_position - step_size < LA_RETRACT);
 }
