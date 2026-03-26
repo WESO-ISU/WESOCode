@@ -1,4 +1,8 @@
 //NEED TO KNOW SPECIFIC LIBRARIES TO USE FOR EACH COMPONENT.
+#include <servo.h>
+#include <SD.h>
+
+
 int LOAD_PIN1 = 2;
 int LOAD_PIN2 = 3;
 int LOAD_PIN3 = 4;
@@ -11,7 +15,7 @@ int LOAD_PIN8 = 9;
 int CS1_PIN = 10;
 int CS2_PIN = 37;
 int SCK_PIN = 13;
-int MOSI_PIN = 11
+int MOSI_PIN = 11;
 int MISO_PIN = 12;
 
 int IR_PIN = 1;
@@ -81,7 +85,7 @@ int lastState = HIGH;
 unsigned long pulseTimes[5];
 int pulseIndex = 0;
 bool bufferFull = false;
-int NUM_BLADES = 5;
+int NUM_BLADES = 1;
 
 float get_rpm() {
   int sensorVal = digitalRead(IR_PIN);
@@ -137,3 +141,5 @@ int change_load_resistence(float resistance);
 // Table | RPM | voltage | current | 
 
 //PRINT OUT ALL FUNCTIONS IN A CSV FORMAT.
+
+```

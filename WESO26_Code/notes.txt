@@ -1,0 +1,13 @@
+Need to multi thread teensy!
+All sensors should be on a single thread
+SD writing should be simple. Don't write too often!
+SD writing should be on its own thread. 
+ 
+
+Let SD writing be on its own thread, and everything else on a differend thread.
+
+Main thread: Load detect
+
+SD thread: SD shit
+
+
