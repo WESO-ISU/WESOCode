@@ -46,6 +46,19 @@ char current_filename[20];
 
 Servo linearActuator;
 
+//Differential Pressor Sensor (DPS) setup stuff here
+const int WIND_SENSOR_PIN = 14;
+const int ADC_RESOLUTION = 4096;
+const float ADC_VREF = 3.3f;
+const float R1 = 6800.0f; // Top resistor value - subject to change - not currently accurate
+const float R2 = 10000.0f; // Bottom resistor value - subject to change - not currently accurate
+const float DIVIDER_FACTOR = (R1 + R2) / R2; 
+const float VS = 5.0f;
+//const float AIR_DENSITY_IA = 1.197f; //Magic number: this is the air density in Ames Iowa, or places with ~292m of elevation
+//const float AIR_DENSITY_CO = 1.045f; //Magic number: this is the air density in Boulder Colorado, or places with ~1655m of elevation
+const float AIR_DENSITY = 1.197f;      //^ 
+const int NUM_SAMPLES = 10; //Amount of samples to average the reading
+
 struct DataPoint {
     unsigned long timestamp;
     float rpm;
@@ -73,6 +86,7 @@ void ir_interrupt() {
     lastPulseTime = now;
 }
 
+//Consider making setup methods like setup_sd() for each component that needs to be setup for readability and scalability.
 void setup() {
   pinMode(IR_PIN, INPUT);
   Serial.begin(9600);
@@ -90,6 +104,12 @@ void setup() {
   threads.addThread(sampling_thread);
   threads.addThread(flush_thread);
   pinMode(RECORD_BTN_PIN, INPUT_PULLUP);
+  setup_dps();
+}
+
+void setup_dps(){
+    analogReadResolution(12);
+    pinMode(WIND_SENSOR_PIN, INPUT);
 }
 
 void setup_sd(){
@@ -169,6 +189,7 @@ void handle_actuator_write(int write_value){
     }
 }
 
+//Check legitimacy of logic (De Morgan)
 bool is_legal_la_step(int step_size){
       //return true;
     return !(la_current_position + step_size > LA_EXTEND && la_current_position - step_size < LA_RETRACT);
@@ -180,8 +201,14 @@ bool is_legal_la_write(int write_value){
 
 
   
-/*
-void record_rpm(); // write to sd card  
+/* These record methods will actually exist in 
+sampling_thread(). The method will make a call to some 
+get method. This will allow us to format the data in the 
+file better. We will keep the method stubs to remind us 
+what to record. 
+
+void record_rpm(); 
+/ write to sd card  
 
 void record_voltage(); 
 
@@ -301,7 +328,26 @@ float get_rpm() {
 
 
 
-float get_windspeed(); 
+float get_windspeed(){
+    long adcSum = 0;
+    for(int i = 0; i < NUM_SAMPLES; i++){
+        adcSum += analogRead(WIND_SENSOR_PIN);
+        delayMicroseconds(200);
+    }
+    float adcAvg = (float)adcSum / NUM_SAMPLES;
+
+    float vMeasured = (adcAvg / (ADC_RESOLUTION - 1)) * ADC_VREF;
+    float vOut = vMeasured * DIVIDER_FACTOR;
+
+    float pressureKPa = (vOut / VS - 0.5f) / 0.2f;
+    float pressurePa = pressureKPa * 1000.0f;
+
+    if(pressurePa <= 0.0f) return 0.0f;
+
+    //Bernoulli's equation
+    float windSpeed = sqrt(2.0f * pressurePa / AIR_DENSITY);
+    return windSpeed;
+} 
 
   
 
