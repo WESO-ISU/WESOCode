@@ -2,6 +2,7 @@
 #include <Servo.h>
 #include <SD.h>
 #include <TeensyThreads.h>
+#include <stdint.h>
 
 
 int LOAD_PIN1 = 2;
@@ -37,6 +38,8 @@ const int LA_STEP_SIZE = 1; //Common step size for moving linear actuator. Look 
 const int LA_HOME_POSITION = 102; //This is the home position of the linear actuator. Subject to change.
 int la_current_position = 102; //This also acts as the starting position for la. Remeber to change this value whenever the linear actuator is moved to ensure position stays in bounds.
 
+const int E_STOP_POSITION = 83; // Change this value to the correct e-stop value, 83 is likely incorrect. 
+
 const int BUFFER_SIZE = 50;
 const int FLUSH_INTERVAL_MS = 5000;
 const int SAMPLE_INTERVAL_MS = 100;
@@ -59,9 +62,22 @@ const float VS = 5.0f;
 const float AIR_DENSITY = 1.197f;      //^ 
 const int NUM_SAMPLES = 10; //Amount of samples to average the reading
 
+int loadArray[8] = {1,1,1,1,1,1,1,1};
+// Set to true if HIGH activates a resistor, false if LOW activates
+const bool LOAD_ACTIVE_HIGH = true;
+
+const int LOAD_PINS[8] = {
+    LOAD_PIN8, LOAD_PIN7, LOAD_PIN6, LOAD_PIN5,
+    LOAD_PIN4, LOAD_PIN3, LOAD_PIN2, LOAD_PIN1
+};
+
+
 struct DataPoint {
     unsigned long timestamp;
     float rpm;
+    float wind_speed;
+    float voltage;
+    float current;
     int la_position;
 };
 
@@ -105,6 +121,7 @@ void setup() {
   threads.addThread(flush_thread);
   pinMode(RECORD_BTN_PIN, INPUT_PULLUP);
   setup_dps();
+  setup_loads();
 }
 
 void setup_dps(){
@@ -120,9 +137,20 @@ void setup_sd(){
     Serial.println("SD setup was successful.");
 }
 
+void setup_loads() {
+    for (int i = 0; i < 8; i++) {
+        pinMode(LOAD_PINS[i], OUTPUT);
+        digitalWrite(LOAD_PINS[i], LOAD_ACTIVE_HIGH ? LOW : HIGH); // default all off
+    }
+}
+
 
 //E-stop states methods 
-
+void eStop(){
+    handle_actuator_write(E_STOP_POSITION);
+    //Should e-stop do anything after this?
+    //Should it wait a while and restart, or kill everthing completely?
+}
   
 
 void e_stop(); //change linear actuator to the stopping angle.  
@@ -189,7 +217,7 @@ void handle_actuator_write(int write_value){
     }
 }
 
-//Check legitimacy of logic (De Morgan)
+
 bool is_legal_la_step(int step_size){
       //return true;
     return !(la_current_position + step_size > LA_EXTEND && la_current_position - step_size < LA_RETRACT);
@@ -225,6 +253,9 @@ void sampling_thread(){
             DataPoint dp;
             dp.timestamp = millis();
             dp.rpm = get_rpm();
+            dp.wind_speed = get_windspeed();
+            dp.voltage = getVoltage();
+            dp.current = getCurrent();
             dp.la_position = la_current_position;
 
             buffer_mutex.lock();
@@ -288,7 +319,7 @@ void start_recording(){
 
     File f = SD.open(current_filename, FILE_WRITE);
     if (f){
-        f.println("timestamp_ms,rpm,la_position");
+        f.println("timestamp_ms,rpm,wind_speed_ms,voltage,current,la_position");
         f.close();
         is_recording = true;
         Serial.print("Recording started: ");
@@ -308,10 +339,6 @@ void stop_recording(){
 //Methods used in multiple different states 
 
   
-
-float get_voltage(); 
-
-float get_current(); 
 
 
 
@@ -352,18 +379,39 @@ float get_windspeed(){
   
 
   
+//These methods need to be completed. 
+float getVoltage(){
+    return -1;
+}
 
-//State transition methods 
+float getCurrent(){
+    return -1; 
+}
 
   
 
-  
+//LOAD METHODS HERE
+//loads the load array with the correct binary values from the given uint8_t
+void loadLoadArray(uint8_t loadValue){ 
+    for (int i = 0; i < 8; i++){
+        loadArray[i] = (loadValue >> (7 - i)) & 1; 
+    }
+}
 
-//All random methods to be sorted later 
+void printLoadArray(){
+    for(int i = 0; i < 7; i++){
+        Serial.print(loadArray[i]);    
+    }
+    Serial.println("");
+}
 
-  
+void loadLoad() {
+    for (int i = 0; i < 8; i++) {
+        bool activate = (loadArray[i] == 1);
+        digitalWrite(LOAD_PINS[i], (activate == LOAD_ACTIVE_HIGH) ? HIGH : LOW);
+    }
+}
 
-int change_load_resistence(float resistance); 
 
 void loop(){
     handle_record_button();
@@ -374,7 +422,11 @@ void loop(){
     Serial.print(" ");
     Serial.println(la_current_position);
     delay(25);
+    
+    
 }
+
+
 
   
 
