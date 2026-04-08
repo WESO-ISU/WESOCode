@@ -286,6 +286,12 @@ void flush_thread(){
                         f.print(",");
                         f.print(flush_buffer[i].rpm);
                         f.print(",");
+                        f.print(flush_buffer[i].wind_speed);
+                        f.print(",");
+                        f.print(flush_buffer[i].voltage);
+                        f.print(",");
+                        f.print(flush_buffer[i].current);
+                        f.print(",");
                         f.println(flush_buffer[i].la_position);
                     }
                 f.close();
