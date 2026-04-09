@@ -10,4 +10,11 @@ Main thread: Load detect
 
 SD thread: SD shit
 
+//get pcbs in ? -> working ? ->  read volgate, estop function with a compare (load detect), maybe current, 
+not optically isolated (load volatage sensor)
+turbine side is optically isolated, wind speed output adc. Read all sensors! 
+//no pcbs ? -> innovation at iowa state 
+
+Parallel resistence method value methods
+Load change method , really want this !
 

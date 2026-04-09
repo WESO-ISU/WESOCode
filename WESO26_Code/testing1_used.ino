@@ -400,7 +400,7 @@ float getCurrent(){
 //loads the load array with the correct binary values from the given uint8_t
 void loadLoadArray(uint8_t loadValue){ 
     for (int i = 0; i < 8; i++){
-        loadArray[i] = (loadValue >> (7 - i)) & 1; 
+        loadArray[7-i] = (loadValue >> (7 - i)) & 1; 
     }
 }
 
