@@ -3,6 +3,7 @@
 #include <SD.h>
 #include <TeensyThreads.h>
 #include <stdint.h>
+#include <SPI.h>
 
 
 int LOAD_PIN1 = 2;
@@ -95,6 +96,28 @@ Threads::Mutex buffer_mutex;
 volatile unsigned long lastPulseTime = 0;
 volatile unsigned long pulseInterval = 0;
 
+//Voltage and current sensor stuff 
+const float LMP_VREF = 2.048f;           // Internal reference voltage
+const float LMP_ADC_COUNTS = 4096.0f;    // 12-bit ADC
+
+// Current channel: code = (V_diff * gain * ADC_counts) / VREF
+// gain = 25, so current = (code / 50000) / R_SENSE
+const float R_SENSE = 0.050f;            // 50m ohmplaceholder - update when confirmed
+
+// Voltage divider: R2=1.6k ohm, R3=46.4k ohm from datasheet example - update when confirmed
+const float LMP_VDIV_R2 = 1600.0f;
+const float LMP_VDIV_R3 = 46400.0f;
+const float LMP_VDIV_FACTOR = (LMP_VDIV_R2 + LMP_VDIV_R3) / LMP_VDIV_R2;
+
+// Register addresses
+const uint16_t LMP_REG_STATUS   = 0x0103;
+const uint16_t LMP_REG_VOUT_LSB = 0x0200;
+const uint16_t LMP_REG_VOUT_MSB = 0x0201;
+const uint16_t LMP_REG_COUT_LSB = 0x0202;
+const uint16_t LMP_REG_COUT_MSB = 0x0203;
+
+
+
 void ir_interrupt() {
     unsigned long now = micros();
     if (now - lastPulseTime < 10000) return;  // ignore if less than 10ms since last pulse
@@ -122,6 +145,7 @@ void setup() {
   pinMode(RECORD_BTN_PIN, INPUT_PULLUP);
   setup_dps();
   setup_loads();
+  setup_lmp();
 }
 
 void setup_dps(){
@@ -144,6 +168,14 @@ void setup_loads() {
     }
 }
 
+void setup_lmp(){
+    pinMode(CS2_PIN, OUTPUT);
+    digitalWrite(CS2_PIN, HIGH);
+    SPI.begin();
+    delay(10);
+    Serial.println("LMP SPI ready");
+}
+
 
 //E-stop states methods 
 void eStop(){
@@ -152,8 +184,6 @@ void eStop(){
     //Should it wait a while and restart, or kill everthing completely?
 }
   
-
-void e_stop(); //change linear actuator to the stopping angle.  
 
   
 
@@ -385,13 +415,41 @@ float get_windspeed(){
   
 
   
-//These methods need to be completed. 
+uint8_t lmp_read_register(uint16_t reg_addr){
+    uint16_t cmd = 0x8000 | (reg_addr & 0x7FFF);
+
+    SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+    digitalWrite(CS2_PIN, LOW);
+    SPI.transfer16(cmd);
+    uint8_t result = SPI.transfer(0x00);
+    digitalWrite(CS2_PIN, HIGH);
+    SPI.endTransaction();
+   
+    return result;
+}
+
 float getVoltage(){
-    return -1;
+    uint8_t cout_msb = lmp_read_register(LMP_REG_COUT_MSB);
+    uint8_t cout_lsb = lmp_read_register(LMP_REG_COUT_LSB);
+    uint8_t vout_msb = lmp_read_register(LMP_REG_VOUT_MSB);
+    uint8_t vout_lsb = lmp_read_register(LMP_REG_VOUT_LSB);
+
+    uint16_t vout_code = ((uint16_t)(vout_msb & 0x0f) << 8) | vout_lsb;
+
+    float v_sensed = (vout_code / LMP_ADC_COUNTS) * LMP_VREF;
+    return v_sensed * LMP_VDIV_FACTOR;
 }
 
 float getCurrent(){
-    return -1; 
+    uint8_t cout_msb = lmp_read_register(LMP_REG_COUT_MSB);
+    uint8_t cout_lsb = lmp_read_register(LMP_REG_COUT_LSB);
+    uint8_t vout_msb = lmp_read_register(LMP_REG_VOUT_MSB);
+    uint8_t vout_lsb = lmp_read_register(LMP_REG_VOUT_LSB);
+
+    uint16_t cout_code = ((uint16_t)(cout_msb & 0x0F) << 8) | cout_lsb;
+
+    float v_diff = (cout_code / LMP_ADC_COUNTS) * LMP_VREF / 25.0f;
+    return v_diff / R_SENSE;
 }
 
   
