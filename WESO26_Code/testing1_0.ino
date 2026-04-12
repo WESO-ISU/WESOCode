@@ -4,14 +4,14 @@
 #include <TeensyThreads.h>
 
 
-int LOAD_PIN1 = 2; //    1280 ohm
-int LOAD_PIN2 = 3; //     640 ohm
-int LOAD_PIN3 = 4; //     320 ohm
-int LOAD_PIN4 = 5; //     160 ohm
-int LOAD_PIN5 = 6; //      80 ohm
-int LOAD_PIN6 = 7; //      40 ohm
-int LOAD_PIN7 = 8; //      20 ohm
-int LOAD_PIN8 = 9; //      10 ohm
+int LOAD_PIN1 = 2;  //    1280 ohm
+int LOAD_PIN2 = 3;  //     640 ohm
+int LOAD_PIN3 = 4;  //     320 ohm
+int LOAD_PIN4 = 5;  //     160 ohm
+int LOAD_PIN5 = 6;  //      80 ohm
+int LOAD_PIN6 = 7;  //      40 ohm
+int LOAD_PIN7 = 8;  //      20 ohm
+int LOAD_PIN8 = 9;  //      10 ohm
 int SATIC_LOAD = 4; //Talk to Jack if you forget what this means Eli. 
 
 int CS1_PIN = 10;
