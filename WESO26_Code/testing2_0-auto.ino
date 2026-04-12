@@ -1,9 +1,9 @@
 //NEED TO KNOW SPECIFIC LIBRARIES TO USE FOR EACH COMPONENT.
-//This is the autonomous version of the ISU WESO code, this code should run itself, fingers crossed!
 #include <Servo.h>
 #include <SD.h>
 #include <TeensyThreads.h>
 #include <stdint.h>
+#include <SPI.h>
 
 
 int LOAD_PIN1 = 2;
@@ -96,6 +96,52 @@ Threads::Mutex buffer_mutex;
 volatile unsigned long lastPulseTime = 0;
 volatile unsigned long pulseInterval = 0;
 
+//Voltage and current sensor stuff 
+const float LMP_VREF = 2.048f;           // Internal reference voltage
+const float LMP_ADC_COUNTS = 4096.0f;    // 12-bit ADC
+
+// Current channel: code = (V_diff * gain * ADC_counts) / VREF
+// gain = 25, so current = (code / 50000) / R_SENSE
+const float R_SENSE = 0.050f;            // 50m ohmplaceholder - update when confirmed
+
+// Voltage divider: R2=1.6k ohm, R3=46.4k ohm from datasheet example - update when confirmed
+const float LMP_VDIV_R2 = 1600.0f;
+const float LMP_VDIV_R3 = 46400.0f;
+const float LMP_VDIV_FACTOR = (LMP_VDIV_R2 + LMP_VDIV_R3) / LMP_VDIV_R2;
+
+// Register addresses
+const uint16_t LMP_REG_STATUS   = 0x0103;
+const uint16_t LMP_REG_VOUT_LSB = 0x0200;
+const uint16_t LMP_REG_VOUT_MSB = 0x0201;
+const uint16_t LMP_REG_COUT_LSB = 0x0202;
+const uint16_t LMP_REG_COUT_MSB = 0x0203;
+
+
+//Random tunable consts, I am loosing the plot pretty hard...
+const float WIND_STABLE_DELTA = 0.3f;    // m/s — max change between samples to be considered stable
+const unsigned long WIND_STABLE_TIME_MS = 750; // how long wind must stay within delta to be considered stable
+
+
+//Lookup table bullshit
+struct LookupEntry {
+    float wind_speed;        // m/s
+    int la_position;         // target LA position for this wind speed
+    float resistance_ohms;   // human-readable resistance value
+    uint8_t load_byte;       // raw value to pass to loadLoadArray()
+};
+
+// Mock table - replace all values after tunnel testing
+const int LOOKUP_TABLE_SIZE = 5;
+const LookupEntry lookupTable[LOOKUP_TABLE_SIZE] = {
+    // wind_speed, la_position, resistance_ohms, load_byte
+    { 4.0f,  88,  10.0f, 0b00000001 },
+    { 6.0f,  93,  20.0f, 0b00000011 },
+    { 8.0f,  98,  40.0f, 0b00000111 },
+    { 10.0f, 104, 80.0f, 0b00001111 },
+    { 12.0f, 110, 160.0f, 0b00011111 } //This shi should be a bit longer. we NEED to get this jawn looking nice during testind monday 4/13/2026
+};
+
+
 void ir_interrupt() {
     unsigned long now = micros();
     if (now - lastPulseTime < 10000) return;  // ignore if less than 10ms since last pulse
@@ -123,6 +169,7 @@ void setup() {
   pinMode(RECORD_BTN_PIN, INPUT_PULLUP);
   setup_dps();
   setup_loads();
+  setup_lmp();
 }
 
 void setup_dps(){
@@ -145,6 +192,14 @@ void setup_loads() {
     }
 }
 
+void setup_lmp(){
+    pinMode(CS2_PIN, OUTPUT);
+    digitalWrite(CS2_PIN, HIGH);
+    SPI.begin();
+    delay(10);
+    Serial.println("LMP SPI ready");
+}
+
 
 //E-stop states methods 
 void eStop(){
@@ -153,8 +208,6 @@ void eStop(){
     //Should it wait a while and restart, or kill everthing completely?
 }
   
-
-void e_stop(); //change linear actuator to the stopping angle.  
 
   
 
@@ -343,10 +396,6 @@ void stop_recording(){
 }
   
 
-//Methods used in multiple different states 
-
-  
-
 
 
 float get_rpm() {
@@ -386,13 +435,41 @@ float get_windspeed(){
   
 
   
-//These methods need to be completed. 
+uint8_t lmp_read_register(uint16_t reg_addr){
+    uint16_t cmd = 0x8000 | (reg_addr & 0x7FFF);
+
+    SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+    digitalWrite(CS2_PIN, LOW);
+    SPI.transfer16(cmd);
+    uint8_t result = SPI.transfer(0x00);
+    digitalWrite(CS2_PIN, HIGH);
+    SPI.endTransaction();
+   
+    return result;
+}
+
 float getVoltage(){
-    return -1;
+    uint8_t cout_msb = lmp_read_register(LMP_REG_COUT_MSB);
+    uint8_t cout_lsb = lmp_read_register(LMP_REG_COUT_LSB);
+    uint8_t vout_msb = lmp_read_register(LMP_REG_VOUT_MSB);
+    uint8_t vout_lsb = lmp_read_register(LMP_REG_VOUT_LSB);
+
+    uint16_t vout_code = ((uint16_t)(vout_msb & 0x0f) << 8) | vout_lsb;
+
+    float v_sensed = (vout_code / LMP_ADC_COUNTS) * LMP_VREF;
+    return v_sensed * LMP_VDIV_FACTOR;
 }
 
 float getCurrent(){
-    return -1; 
+    uint8_t cout_msb = lmp_read_register(LMP_REG_COUT_MSB);
+    uint8_t cout_lsb = lmp_read_register(LMP_REG_COUT_LSB);
+    uint8_t vout_msb = lmp_read_register(LMP_REG_VOUT_MSB);
+    uint8_t vout_lsb = lmp_read_register(LMP_REG_VOUT_LSB);
+
+    uint16_t cout_code = ((uint16_t)(cout_msb & 0x0F) << 8) | cout_lsb;
+
+    float v_diff = (cout_code / LMP_ADC_COUNTS) * LMP_VREF / 25.0f;
+    return v_diff / R_SENSE;
 }
 
   
@@ -418,6 +495,123 @@ void loadLoad() {
         digitalWrite(LOAD_PINS[i], (activate == LOAD_ACTIVE_HIGH) ? HIGH : LOW);
     }
 }
+
+
+//State machine stuff
+
+
+bool is_wind_stable(float current_wind) {
+    static float last_wind = 0.0f;
+    static unsigned long stable_since = 0;
+
+    if (abs(current_wind - last_wind) > WIND_STABLE_DELTA) {
+        // Wind is still changing, reset the timer
+        stable_since = millis();
+    }
+
+    last_wind = current_wind;
+    return (millis() - stable_since >= WIND_STABLE_TIME_MS);
+}
+
+int lookup_la_position(float wind_speed) {
+    // Below table minimum
+    if (wind_speed <= lookupTable[0].wind_speed)
+        return lookupTable[0].la_position;
+    // Above table maximum
+    if (wind_speed >= lookupTable[LOOKUP_TABLE_SIZE - 1].wind_speed)
+        return lookupTable[LOOKUP_TABLE_SIZE - 1].la_position;
+
+    // Find surrounding entries and interpolate
+    for (int i = 0; i < LOOKUP_TABLE_SIZE - 1; i++) {
+        if (wind_speed >= lookupTable[i].wind_speed && 
+            wind_speed <= lookupTable[i+1].wind_speed) {
+            float t = (wind_speed - lookupTable[i].wind_speed) /
+                      (lookupTable[i+1].wind_speed - lookupTable[i].wind_speed);
+            return (int)(lookupTable[i].la_position + 
+                        t * (lookupTable[i+1].la_position - lookupTable[i].la_position));
+        }
+    }
+    return LA_HOME_POSITION; // fallback
+}
+
+uint8_t lookup_load_byte(float wind_speed) {
+    // Below table minimum
+    if (wind_speed <= lookupTable[0].wind_speed)
+        return lookupTable[0].load_byte;
+    // Above table maximum
+    if (wind_speed >= lookupTable[LOOKUP_TABLE_SIZE - 1].wind_speed)
+        return lookupTable[LOOKUP_TABLE_SIZE - 1].load_byte;
+
+    // Find surrounding entries and interpolate the resistance, then find nearest load_byte
+    for (int i = 0; i < LOOKUP_TABLE_SIZE - 1; i++) {
+        if (wind_speed >= lookupTable[i].wind_speed && 
+            wind_speed <= lookupTable[i+1].wind_speed) {
+            float t = (wind_speed - lookupTable[i].wind_speed) /
+                      (lookupTable[i+1].wind_speed - lookupTable[i].wind_speed);
+            // Interpolate resistance then round to nearest load_byte
+            float interp_resistance = lookupTable[i].resistance_ohms +
+                        t * (lookupTable[i+1].resistance_ohms - lookupTable[i].resistance_ohms);
+            // Find the entry whose resistance is closest to interpolated value
+            int best = 0;
+            float best_diff = abs(lookupTable[0].resistance_ohms - interp_resistance);
+            for (int j = 1; j < LOOKUP_TABLE_SIZE; j++) {
+                float diff = abs(lookupTable[j].resistance_ohms - interp_resistance);
+                if (diff < best_diff) { best_diff = diff; best = j; }
+            }
+            return lookupTable[best].load_byte;
+        }
+    }
+    return 0; // fallback - no load
+}
+
+void state_active_reading() {
+    if (should_estop()) { current_state = STATE_ESTOP; return; }
+
+    float rpm = get_rpm();
+    float wind = get_windspeed();
+    bool load = detect_load();
+
+    Serial.print("ACTIVE - RPM: "); Serial.print(rpm);
+    Serial.print(" Wind: "); Serial.println(wind);
+
+    if (!load) { current_state = STATE_ESTOP; return; }
+    if (rpm < RPM_DROP_THRESHOLD) { current_state = STATE_HILL_CLIMBER; return; }
+
+    if (!is_wind_stable(wind)) {
+        // Wind is still changing, just wait
+        return;
+    }
+
+    // Wind is stable - look up and step toward target LA position
+    int target_la = lookup_la_position(wind);
+    if (la_current_position != target_la) {
+        int step = (target_la > la_current_position) ? LA_STEP_SIZE : -LA_STEP_SIZE;
+        handle_actuator_write(la_current_position + step);
+        return; // Step once per loop iteration, come back next iteration
+    }
+
+    // LA is at target - now check if RPM has stabilized
+    static float last_rpm = 0.0f;
+    static unsigned long rpm_stable_since = 0;
+    if (abs(rpm - last_rpm) > RPM_MARGIN) {
+        rpm_stable_since = millis();
+    }
+    last_rpm = rpm;
+
+    if (millis() - rpm_stable_since < WIND_STABLE_TIME_MS) {
+        // RPM still settling, wait
+        return;
+    }
+
+    // RPM is stable - apply optimal load from lookup table
+    uint8_t target_load = lookup_load_byte(wind);
+    loadLoadArray(target_load);
+    loadLoad();
+
+    Serial.print("Load applied: 0b");
+    Serial.println(target_load, BIN);
+}
+
 
 
 void loop(){

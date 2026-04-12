@@ -1,0 +1,7 @@
+1. What is the expecte max amps that will go throught our circuit? We need this information to 
+determine an R_SENSE value. A physical resistor will need to run in series with the load. 
+This is to get accurate readings. 
+
+2. What devices will be using SPI? What devices will not be?
+
+3.
