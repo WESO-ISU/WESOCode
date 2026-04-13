@@ -18,3 +18,9 @@ turbine side is optically isolated, wind speed output adc. Read all sensors!
 Parallel resistence method value methods
 Load change method , really want this !
 
+
+New flush method to allow values from data struct to be printed to serial monitor from a button press
+This will help with the construction of the lookup table. NEED THIS BY 4/12/2026
+
+NEED ABSOLUTELY NEED TO MAKE SURE THAT THE LOOKUP TABLE IS COMPLETED AND HAS ALL NEEDED DATA!
+CONSIDER A LOOKUP TABLE CALIBRATOR METHOD TO MAKE SURE THAT EVERYTHING IS UP TO SNUFF IN COLORADO

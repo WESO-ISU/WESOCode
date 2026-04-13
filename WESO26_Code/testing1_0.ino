@@ -12,7 +12,7 @@ int LOAD_PIN5 = 6;  //      80 ohm
 int LOAD_PIN6 = 7;  //      40 ohm
 int LOAD_PIN7 = 8;  //      20 ohm
 int LOAD_PIN8 = 9;  //      10 ohm
-int SATIC_LOAD = 4; //Talk to Jack if you forget what this means Eli. 
+int SATIC_LOAD = 4; //Talk to Jack if you forget     what this means Eli. 
 
 int CS1_PIN = 10;
 int CS2_PIN = 37;
