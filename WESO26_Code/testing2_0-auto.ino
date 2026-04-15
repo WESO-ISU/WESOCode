@@ -203,7 +203,18 @@ void setup_lmp(){
 
 //E-stop states methods 
 void eStop(){
-    handle_actuator_write(E_STOP_POSITION);
+    if(la_current_position - E_STOP_POSITION > 0){
+      for(int i = la_current_position; i > E_STOP_POSITION; i--){
+          handle_actuator_write(i);
+          delay(25);
+      }
+    } else {
+        for(int i = la_current_position; i < E_STOP_POSITION; i++){
+            handle_actuator_write(i);
+            delay(25);
+        }
+    }
+   
     //Should e-stop do anything after this?
     //Should it wait a while and restart, or kill everthing completely?
 }
@@ -274,11 +285,11 @@ void handle_actuator_write(int write_value){
 
 bool is_legal_la_step(int step_size){
       //return true;
-    return !(la_current_position + step_size > LA_EXTEND && la_current_position - step_size < LA_RETRACT);
+    return !(la_current_position + step_size > LA_EXTEND || la_current_position - step_size < LA_RETRACT);
 }
 
 bool is_legal_la_write(int write_value){
-    return !(write_value > LA_EXTEND && write_value < LA_RETRACT);
+    return !(write_value > LA_EXTEND || write_value < LA_RETRACT);
 }
 
 
