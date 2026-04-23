@@ -50,18 +50,19 @@ char current_filename[20];
 
 Servo linearActuator;
 
-//Differential Pressor Sensor (DPS) setup stuff here
-const int WIND_SENSOR_PIN = 14;
-const int ADC_RESOLUTION = 4096;
-const float ADC_VREF = 3.3f;
-const float R1 = 6800.0f; // Top resistor value - subject to change - not currently accurate
-const float R2 = 10000.0f; // Bottom resistor value - subject to change - not currently accurate
-const float DIVIDER_FACTOR = (R1 + R2) / R2; 
-const float VS = 5.0f;
+// Wind speed estimation
+float estimated_wind_speed = 5.0f;  // Always starts at 5 m/s per competition rules
+const float WIND_SPEED_START = 5.0f;
+const float WIND_SPEED_INCREMENT = 1.0f;   // Competition increases by 1 m/s at a time
+const float WIND_SPEED_MAX = 13.0f;        // Competition max
+const float WIND_SPEED_POWER_HOLD = 10.0f; // At this speed, hold power output constant
+const float RPM_WIND_INCREMENT_THRESHOLD = 20.0f; // RPM increase that indicates a wind speed step - tune after testing
 //const float AIR_DENSITY_IA = 1.197f; //Magic number: this is the air density in Ames Iowa, or places with ~292m of elevation
 //const float AIR_DENSITY_CO = 1.045f; //Magic number: this is the air density in Boulder Colorado, or places with ~1655m of elevation
 const float AIR_DENSITY = 1.197f;      //^ 
 const int NUM_SAMPLES = 10; //Amount of samples to average the reading
+
+float target_power_watts = 0.0f; 
 
 int loadArray[8] = {1,1,1,1,1,1,1,1};
 // Set to true if HIGH activates a resistor, false if LOW activates
@@ -102,7 +103,7 @@ const float LMP_ADC_COUNTS = 4096.0f;    // 12-bit ADC
 
 // Current channel: code = (V_diff * gain * ADC_counts) / VREF
 // gain = 25, so current = (code / 50000) / R_SENSE
-const float R_SENSE = 0.050f;            // 50m ohmplaceholder - update when confirmed
+const float R_SENSE = 0.020f;            // 20m ohmplaceholder - update when confirmed
 
 // Voltage divider: R2=1.6k ohm, R3=46.4k ohm from datasheet example - update when confirmed
 const float LMP_VDIV_R2 = 1600.0f;
@@ -167,15 +168,11 @@ void setup() {
   threads.addThread(sampling_thread);
   threads.addThread(flush_thread);
   pinMode(RECORD_BTN_PIN, INPUT_PULLUP);
-  setup_dps();
   setup_loads();
   setup_lmp();
 }
 
-void setup_dps(){
-    analogReadResolution(12);
-    pinMode(WIND_SENSOR_PIN, INPUT);
-}
+
 
 void setup_sd(){
     if(!SD.begin(BUILTIN_SDCARD)){
@@ -227,9 +224,7 @@ void eStop(){
   
 
 //Active reading state methods 
-void active_reading();
 
-void set_pitch_angle(float angle); //Requires analogWrite()
 
 //Load change state methods 
   
@@ -422,28 +417,34 @@ float get_rpm() {
 
 
 
-float get_windspeed(){
-    long adcSum = 0;
-    for(int i = 0; i < NUM_SAMPLES; i++){
-        adcSum += analogRead(WIND_SENSOR_PIN);
-        delayMicroseconds(200);
+float get_windspeed() {
+    return estimated_wind_speed;
+}
+
+void update_wind_speed() {
+    static float baseline_rpm = 0.0f;
+    static bool baseline_set = false;
+
+    float rpm = get_rpm();
+
+    // Set baseline RPM when we first enter idle at this wind speed
+    if (!baseline_set) {
+        baseline_rpm = rpm;
+        baseline_set = true;
+        return;
     }
-    float adcAvg = (float)adcSum / NUM_SAMPLES;
 
-    float vMeasured = (adcAvg / (ADC_RESOLUTION - 1)) * ADC_VREF;
-    float vOut = vMeasured * DIVIDER_FACTOR;
-
-    float pressureKPa = (vOut / VS - 0.5f) / 0.2f;
-    float pressurePa = pressureKPa * 1000.0f;
-
-    if(pressurePa <= 0.0f) return 0.0f;
-
-    //Bernoulli's equation
-    float windSpeed = sqrt(2.0f * pressurePa / AIR_DENSITY);
-    return windSpeed;
-} 
-
-  
+    // If RPM has increased significantly above baseline, wind speed has stepped up
+    if (rpm - baseline_rpm > RPM_WIND_INCREMENT_THRESHOLD) {
+        if (estimated_wind_speed < WIND_SPEED_MAX) {
+            estimated_wind_speed += WIND_SPEED_INCREMENT;
+            Serial.print("Wind speed updated to: ");
+            Serial.println(estimated_wind_speed);
+        }
+        // Reset baseline for next increment
+        baseline_set = false;
+    }
+}
 
   
 uint8_t lmp_read_register(uint16_t reg_addr){
@@ -481,6 +482,10 @@ float getCurrent(){
 
     float v_diff = (cout_code / LMP_ADC_COUNTS) * LMP_VREF / 25.0f;
     return v_diff / R_SENSE;
+}
+
+float get_power() {
+    return getVoltage() * getCurrent();
 }
 
   
@@ -575,9 +580,186 @@ uint8_t lookup_load_byte(float wind_speed) {
     return 0; // fallback - no load
 }
 
+
+
+// ---- Tunable Constants ----
+const float RPM_MAX_THRESHOLD = 300.0f;
+const float RPM_MIN_THRESHOLD = 50.0f;
+const float RPM_TARGET = 200.0f;              // Update after tunnel testing
+const float RPM_MARGIN = 10.0f;
+const float RPM_DROP_THRESHOLD = 80.0f;
+const int   HILL_CLIMBER_WAIT_MS = 2000;
+const int   HILL_CLIMBER_LA_STEP = 2;
+const int   LOAD_CHANGE_WAIT_MS = 3000;
+const float LOAD_DETECT_VOLTAGE_MIN = 0.5f;
+const float LOAD_DETECT_CURRENT_MIN = 0.05f;
+const float POWER_MARGIN_WATTS = 0.5f;  // Acceptable power error in watts - tune after testing
+const float VOLTAGE_SOFT_LIMIT = 24.0f;  // Start reducing RPM above this
+const float VOLTAGE_HARD_LIMIT = 30.0f;  // Capacitor danger zone, never exceed
+const int   VOLTAGE_LA_STEP = 2;         // How much to extend LA when voltage is too high
+// ---- State Machine ----
+enum State {
+    STATE_ESTOP,
+    STATE_STARTUP,
+    STATE_ACTIVE_READING,
+    STATE_LOAD_CHANGE,
+    STATE_HILL_CLIMBER,
+    STATE_IDLE
+};
+
+State current_state = STATE_STARTUP;
+
+// ---- Helpers ----
+bool detect_load() {
+    return (getVoltage() > LOAD_DETECT_VOLTAGE_MIN && 
+            getCurrent() > LOAD_DETECT_CURRENT_MIN);
+}
+
+bool should_estop() {
+    if (digitalRead(ESTOP_READ_PIN) == LOW) return true;
+    if (get_rpm() > RPM_MAX_THRESHOLD) return true;
+    if (!detect_load()) return true;
+    return false;
+}
+
+void check_voltage_limit() {
+    float voltage = getVoltage();
+
+    if (voltage >= VOLTAGE_HARD_LIMIT) {
+        // Emergency - extend LA as far as safely possible to reduce RPM fast
+        handle_actuator_write(LA_EXTEND);
+        Serial.println("WARNING: Voltage at hard limit!");
+        return;
+    }
+
+    if (voltage >= VOLTAGE_SOFT_LIMIT) {
+        // Soft limit - nudge LA outward to reduce RPM gradually
+        handle_actuator_write(la_current_position + VOLTAGE_LA_STEP);
+        Serial.print("WARNING: Voltage soft limit hit: ");
+        Serial.println(voltage);
+    }
+}
+
+// ---- State Functions ----
+void state_estop() {
+    eStop();
+    float rpm = get_rpm();
+    bool load = detect_load();
+
+    Serial.println("E-STOP");
+
+    if (digitalRead(ESTOP_READ_PIN) == HIGH && load && rpm < RPM_MAX_THRESHOLD) {
+        current_state = STATE_STARTUP;
+    }
+}
+
+void state_startup() {
+    if (should_estop()) { current_state = STATE_ESTOP; return; }
+    check_voltage_limit();
+
+    float rpm = get_rpm();
+    bool load = detect_load();
+
+    Serial.print("STARTUP - RPM: "); Serial.println(rpm);
+
+    if (!load) { current_state = STATE_ESTOP; return; }
+
+    if (rpm > RPM_MIN_THRESHOLD) {
+        current_state = STATE_ACTIVE_READING;
+    }
+}
+
+void state_load_change() {
+    if (should_estop()) { current_state = STATE_ESTOP; return; }
+    check_voltage_limit();
+
+    float wind = get_windspeed();
+    float rpm = get_rpm();
+
+    Serial.print("LOAD CHANGE - RPM: "); Serial.print(rpm);
+    Serial.print(" Wind: "); Serial.println(wind);
+
+    // Load adjustment stubbed - implement after tunnel testing
+    // loadLoadArray(some_value);
+    // loadLoad();
+
+    delay(LOAD_CHANGE_WAIT_MS);
+
+    if (rpm < RPM_MIN_THRESHOLD) { current_state = STATE_STARTUP; return; }
+    if (abs(rpm - RPM_TARGET) <= RPM_MARGIN) { current_state = STATE_ACTIVE_READING; return; }
+    if (rpm >= RPM_MAX_THRESHOLD) { current_state = STATE_IDLE; return; }
+}
+
+void state_hill_climber() {
+    if (should_estop()) { current_state = STATE_ESTOP; return; }
+    check_voltage_limit();
+
+    bool load = detect_load();
+    if (!load) { current_state = STATE_ESTOP; return; }
+
+    Serial.println("HILL CLIMBER");
+
+    handle_actuator_write(la_current_position - HILL_CLIMBER_LA_STEP);
+    delay(HILL_CLIMBER_WAIT_MS);
+
+    float rpm = get_rpm();
+    if (abs(rpm - RPM_TARGET) <= RPM_MARGIN) {
+        current_state = STATE_ACTIVE_READING;
+    }
+}
+
+void state_idle() {
+    if (should_estop()) { current_state = STATE_ESTOP; return; }
+    check_voltage_limit();
+
+    float wind = get_windspeed();
+    bool load = detect_load();
+
+    Serial.print("IDLE - Estimated wind: "); Serial.println(wind);
+
+    if (!load) { current_state = STATE_LOAD_CHANGE; return; }
+
+    // Check if wind speed has incremented
+    update_wind_speed();
+
+    // If wind changed, go back to active reading to re-optimize
+    if (estimated_wind_speed > wind) {
+        current_state = STATE_ACTIVE_READING;
+        return;
+    }
+
+    // At or above power hold threshold - maintain power output instead of maximizing
+    if (estimated_wind_speed >= WIND_SPEED_POWER_HOLD) {
+    // Record target power the first time we hit 10 m/s
+    if (target_power_watts == 0.0f) {
+        target_power_watts = get_power();
+        Serial.print("Target power set: ");
+        Serial.println(target_power_watts);
+        return;
+    }
+
+    float current_power = get_power();
+    float power_error = current_power - target_power_watts;
+
+    // If producing too much power, increase load (more resistance = less current = less power)
+    // If producing too little power, decrease load
+    if (power_error > POWER_MARGIN_WATTS) {
+        uint8_t current_load = loadArray[0]; // rough proxy for current load byte
+        loadLoadArray(current_load + 1);
+        loadLoad();
+    } else if (power_error < -POWER_MARGIN_WATTS) {
+        uint8_t current_load = loadArray[0];
+        loadLoadArray(current_load - 1);
+        loadLoad();
+    }
+    return;
+}
+}
+
+
 void state_active_reading() {
     if (should_estop()) { current_state = STATE_ESTOP; return; }
-
+    check_voltage_limit();
     float rpm = get_rpm();
     float wind = get_windspeed();
     bool load = detect_load();
@@ -625,17 +807,19 @@ void state_active_reading() {
 
 
 
-void loop(){
+void loop() {
     handle_record_button();
     handle_actuator_buttons();
     handle_la_go_home();
 
-    Serial.print(get_rpm());
-    Serial.print(" ");
-    Serial.println(la_current_position);
-    delay(25);
-    
-    
+    switch (current_state) {
+        case STATE_ESTOP:          state_estop();          break;
+        case STATE_STARTUP:        state_startup();        break;
+        case STATE_ACTIVE_READING: state_active_reading(); break;
+        case STATE_LOAD_CHANGE:    state_load_change();    break;
+        case STATE_HILL_CLIMBER:   state_hill_climber();   break;
+        case STATE_IDLE:           state_idle();           break;
+    }
 }
 
 
