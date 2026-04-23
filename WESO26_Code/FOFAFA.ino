@@ -25,14 +25,14 @@ const int ESTOP_READ_PIN  = 23;
 
 const int LA_EXTEND_BTN_PIN   = 24;
 const int LA_RETRACT_BTN_PIN  = 25;
-const int RECORD_BTN_PIN      = 26;
-const int LA_GO_HOME_BTN_PIN  = 27;
+const int RECORD_BTN_PIN      = 26; // 
+const int LA_GO_HOME_BTN_PIN  = 27; //
 
-const int LA_EXTEND       = 120;  // Hard extend limit
-const int LA_RETRACT      = 80;   // Hard retract limit
-const int LA_HOME_POSITION = 102; // Home/default position
-const int LA_STEP_SIZE    = 1;    // Default step size
-const int E_STOP_POSITION = 83;   // Safe position during e-stop - verify with EE team
+const int LA_EXTEND        = 2000;  // Hard extend limit in microseconds
+const int LA_RETRACT       = 1000;  // Hard retract limit in microseconds
+const int LA_HOME_POSITION = 1500;  // Home/default position in microseconds
+const int LA_STEP_SIZE     = 10;    // Step size in microseconds - tune for desired speed
+const int E_STOP_POSITION  = 1100;  // Safe position during e-stop in microseconds - verify with EE team
 
 const int          BUFFER_SIZE       = 50;
 const int          FLUSH_INTERVAL_MS = 5000;
@@ -76,15 +76,15 @@ const int LOOKUP_TABLE_SIZE = 9;
 const LookupEntry lookupTable[LOOKUP_TABLE_SIZE] = {
     //la_position, resistance_ohms, load_byte needs to be chosen from data
     // wind_speed, la_position, resistance_ohms, load_byte
-    {  5.0f,       88,          10.0f,           0b00000001 }, 
-    {  6.0f,       93,          20.0f,           0b00000011 },
-    {  7.0f,       98,          40.0f,           0b00000111 },
-    {  8.0f,       104,         80.0f,           0b00001111 },
-    {  9.0f,       104,         80.0f,           0b00001111 },
-    { 10.0f,       104,         80.0f,           0b00001111 },
-    { 11.0f,       110,         160.0f,          0b00011111 },
-    { 12.0f,       104,         80.0f,           0b00001111 },
-    { 13.0f,       104,         80.0f,           0b00001111 }
+    {  5.0f,       1001,        10.0f,           0b00000001 }, 
+    {  6.0f,       1002,        20.0f,           0b00000011 },
+    {  7.0f,       1003,        40.0f,           0b00000111 },
+    {  8.0f,       1004,        80.0f,           0b00001111 },
+    {  9.0f,       1005,        80.0f,           0b00001111 },
+    { 10.0f,       1006,        80.0f,           0b00001111 },
+    { 11.0f,       1007,        160.0f,          0b00011111 },
+    { 12.0f,       1008,        80.0f,           0b00001111 },
+    { 13.0f,       1009,        80.0f,           0b00001111 }
 };
 
 // TUNABLE CONSTANTS
@@ -169,7 +169,7 @@ void setup() {
 
     // Linear actuator
     linearActuator.attach(LA_PIN);
-    linearActuator.write(LA_HOME_POSITION);
+    linearActuator.writeMicroseconds(LA_HOME_POSITION);
     delay(15);
 
     // Button inputs
@@ -218,7 +218,7 @@ bool is_legal_la_write(int write_value) {
 
 void handle_actuator_write(int write_value) {
     if (is_legal_la_write(write_value)) {
-        linearActuator.write(write_value);
+        linearActuator.writeMicroseconds(write_value);
         la_current_position = write_value;
     }
 }
@@ -229,20 +229,20 @@ void handle_actuator_buttons() {
 
     if (extendPressed && la_current_position + LA_STEP_SIZE < LA_EXTEND) {
         la_current_position += LA_STEP_SIZE;
-        linearActuator.write(la_current_position);
-        Serial.print("LA position: "); Serial.println(la_current_position);
+        linearActuator.writeMicroseconds(la_current_position);
+        Serial.print("LA position (us): "); Serial.println(la_current_position);
         delay(100);
     } else if (retractPressed && la_current_position - LA_STEP_SIZE > LA_RETRACT) {
         la_current_position -= LA_STEP_SIZE;
-        linearActuator.write(la_current_position);
-        Serial.print("LA position: "); Serial.println(la_current_position);
+        linearActuator.writeMicroseconds(la_current_position);
+        Serial.print("LA position (us): "); Serial.println(la_current_position);
         delay(100);
     }
 }
 
 void handle_la_go_home() {
     if (digitalRead(LA_GO_HOME_BTN_PIN) == LOW) {
-        linearActuator.write(LA_HOME_POSITION);
+        linearActuator.writeMicroseconds(LA_HOME_POSITION);
         la_current_position = LA_HOME_POSITION;
         delay(50);
         Serial.println("LA going home.");
