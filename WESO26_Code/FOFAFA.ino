@@ -72,7 +72,7 @@ struct LookupEntry {
 };
 
 // Mock table - replace ALL values after tunnel testing in Colorado
-const int LOOKUP_TABLE_SIZE = 5;
+const int LOOKUP_TABLE_SIZE = 9;
 const LookupEntry lookupTable[LOOKUP_TABLE_SIZE] = {
     //la_position, resistance_ohms, load_byte needs to be chosen from data
     // wind_speed, la_position, resistance_ohms, load_byte
