@@ -14,7 +14,7 @@ const int LOAD_PIN7 = 8;
 const int LOAD_PIN8 = 9;
 
 const int CS1_PIN         = 10;
-const int CS2_PIN         = 37;  // LMP92064 chip select
+const int CS2_PIN         = 36;  // LMP92064 chip select
 const int SCK_PIN         = 13;
 const int MOSI_PIN        = 11;
 const int MISO_PIN        = 12;
@@ -25,8 +25,8 @@ const int ESTOP_READ_PIN  = 23;
 
 const int LA_EXTEND_BTN_PIN   = 24;
 const int LA_RETRACT_BTN_PIN  = 25;
-const int RECORD_BTN_PIN      = 26; // 
-const int LA_GO_HOME_BTN_PIN  = 27; //
+const int RECORD_BTN_PIN      = 26; 
+const int LA_GO_HOME_BTN_PIN  = 27; 
 
 const int LA_EXTEND        = 2000;  // Hard extend limit in microseconds
 const int LA_RETRACT       = 1000;  // Hard retract limit in microseconds
@@ -34,15 +34,15 @@ const int LA_HOME_POSITION = 1500;  // Home/default position in microseconds
 const int LA_STEP_SIZE     = 10;    // Step size in microseconds - tune for desired speed
 const int E_STOP_POSITION  = 1100;  // Safe position during e-stop in microseconds - verify with EE team
 
-const int          BUFFER_SIZE       = 50;
-const int          FLUSH_INTERVAL_MS = 5000;
-const int          SAMPLE_INTERVAL_MS = 100;
+const int BUFFER_SIZE       = 50;
+const int FLUSH_INTERVAL_MS = 5000;
+const int SAMPLE_INTERVAL_MS = 100;
 
 const float LMP_VREF       = 2.048f;
 const float LMP_ADC_COUNTS = 4096.0f;
 const float R_SENSE        = 0.020f;   // 20mΩ - confirm with EE team (must be < 25mΩ for 3A max)
 
-// Voltage divider - update with actual PCB values from EE team
+// Voltage divider - update with actual PCB values from EE team 
 const float LMP_VDIV_R2     = 1600.0f;
 const float LMP_VDIV_R3     = 46400.0f;
 const float LMP_VDIV_FACTOR = (LMP_VDIV_R2 + LMP_VDIV_R3) / LMP_VDIV_R2;
@@ -249,6 +249,10 @@ void handle_la_go_home() {
     }
 }
 
+void handle_eStop_button(){
+    //TODO need to eStop when a button is pressed!!!
+}
+
 void eStop() {
     // Gradually move LA to e-stop position to avoid sudden mechanical shock
     if (la_current_position > E_STOP_POSITION) {
@@ -393,7 +397,7 @@ bool detect_load() {
 
 bool should_estop() {
     if (digitalRead(ESTOP_READ_PIN) == LOW)  return true;
-    if (get_rpm() > RPM_MAX_THRESHOLD)       return true;
+    if (get_rpm() > RPM_MAX_THRESHOLD)       return true; //Don't estop here, lower RPM instead
     if (!detect_load())                      return true;
     return false;
 }
@@ -719,4 +723,5 @@ void loop() {
         case STATE_IDLE:             state_idle();             break;
         case STATE_MAINTAIN_WATTAGE: state_maintain_wattage(); break;
     }
+    //HADNLE ESTOP BUTTON!!!!
 }
