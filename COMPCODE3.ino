@@ -31,9 +31,9 @@ const int LA_GO_HOME_BTN_PIN  = 27;
 // Working duty cycle range confirmed from hardware testing: 3835 (extend) to 3891 (retract).
 // NOTE: Higher duty = more retracted, lower duty = more extended.
 // #FLAG - fine tune bounds after mechanical testing.
-const int LA_DUTY_EXTEND = 3805;
-const int LA_DUTY_RETRACT  = 3880;
-const int LA_DUTY_HOME    = 3830;
+const int LA_DUTY_EXTEND = 3785;
+const int LA_DUTY_RETRACT  = 3891;
+const int LA_DUTY_HOME    = 3815;   
 const int LA_DUTY_STEP     = 1;     // Duty cycle step size //#FLAG tune after mechanical testing
 
 // LA_DUTY_MIN/MAX used purely for bounds checking in constrain() and is_legal_la_duty().
@@ -42,7 +42,7 @@ const int LA_DUTY_MIN = LA_DUTY_EXTEND;   // 3835 - lower bound
 const int LA_DUTY_MAX = LA_DUTY_RETRACT;  // 3891 - upper bound
 
 // #FLAG - Confirm safe e-stop duty cycle with EE/mechanical team before competition.
-const int E_STOP_DUTY = 3880; // Braking angle - full retract
+const int E_STOP_DUTY = 3891; // Braking angle - full retract
 
 const int BUFFER_SIZE        = 50;
 const int FLUSH_INTERVAL_MS  = 5000;
@@ -414,10 +414,36 @@ bool is_rpm_stable() {
 
 void state_estop() {
     eStop();
-    Serial.println("E-STOP");
+
+    static unsigned long release_started_ms = 0;
+    const unsigned long RELEASE_DEBOUNCE_MS = 250;
+
+    bool btn_released = (digitalRead(ESTOP_READ_PIN) == HIGH);
     float rpm = get_rpm();
-    if (digitalRead(ESTOP_READ_PIN) == HIGH && rpm < RPM_MAX_THRESHOLD) {
+
+    Serial.print("E-STOP - btn_released: "); Serial.print(btn_released);
+    Serial.print(" rpm: "); Serial.println(rpm);
+
+    if (!btn_released) {
+        release_started_ms = 0;  // reset debounce while pressed
+        return;
+    }
+
+    if (rpm >= RPM_MAX_THRESHOLD) {
+        release_started_ms = 0;  // not safe to resume yet
+        return;
+    }
+
+    // Button released and RPM safe — start (or continue) debounce timer
+    if (release_started_ms == 0) {
+        release_started_ms = millis();
+        return;
+    }
+
+    if (millis() - release_started_ms >= RELEASE_DEBOUNCE_MS) {
+        Serial.println("E-stop released, resuming.");
         load_disconnected = false;
+        release_started_ms = 0;
         current_state = STATE_STARTUP;
     }
 }

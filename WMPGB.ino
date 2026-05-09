@@ -32,10 +32,10 @@ const int LOAD_PIN6       = 7;
 const int LOAD_PIN7       = 8;
 const int LOAD_PIN8       = 9;
 
-const int IR_PIN          = 15;
+const int IR_PIN          = 1;
 const int LA_PIN          = 0;
-const int ESTOP_WRITE_PIN = 22;
-const int ESTOP_READ_PIN  = 23;
+const int ESTOP_WRITE_PIN = 18;
+const int ESTOP_READ_PIN  = 18;
 
 // ─── Linear Actuator Constants ──────────────────────────────────────────────
 // LA is driven by direct PWM (analogWrite) at 12-bit resolution.
@@ -73,7 +73,7 @@ const uint8_t DEFAULT_LOAD_BYTE = 0xF0;
 // ─── Globals ────────────────────────────────────────────────────────────────
 int la_current_duty       = LA_DUTY_HOME;
 uint8_t loadArray[8]      = {0};
-
+    
 // RPM interrupt state
 volatile unsigned long lastPulseTime = 0;
 volatile unsigned long pulseInterval = 0;
