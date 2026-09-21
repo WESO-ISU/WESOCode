@@ -1,0 +1,97 @@
+// test_ir.ino
+// Tests IR module RPM reading with optical isolation inversion.
+// Uses the exact same interrupt setup, debounce, and RPM calculation as main firmware.
+// Also tests the load disconnect spike detection logic in isolation.
+//
+// HOW TO USE:
+//   Open Serial Monitor at 9600 baud.
+//   Spin the turbine (or wave hand in front of IR sensor) and observe RPM output.
+//   Expected behavior:
+//     - RPM should read 0 when sensor sees no pulses for 2+ seconds
+//     - RPM should climb smoothly as rotation speed increases
+//     - "SPIKE DETECTED" message should appear if RPM jumps > RPM_SPIKE_TEST_THRESHOLD in one pulse
+//   If RPM reads 0 with the turbine spinning, try changing FALLING to RISING -
+//   that would indicate the optocoupler is NOT inverting on this board.
+
+const int IR_PIN = 15;
+
+// Matches main firmware debounce and timeout values exactly
+const unsigned long DEBOUNCE_US    = 10000;  // 10ms debounce
+const unsigned long STALE_PULSE_US = 2000000; // 2s timeout = stopped
+
+// Test spike threshold - mirrors the per-windspeed value used in main firmware
+const float RPM_SPIKE_TEST_THRESHOLD = 200.0f; //#FLAG should match your lookup table rpm_spike_delta
+
+volatile unsigned long lastPulseTime     = 0;
+volatile unsigned long pulseInterval     = 0;
+volatile unsigned long prevPulseInterval = 0;
+
+volatile bool spike_detected = false;
+
+// Exact copy of ir_interrupt() from main firmware (minus the lookup index threshold lookup,
+// replaced with a fixed test threshold so this file is self-contained)
+void ir_interrupt() {
+    unsigned long now = micros();
+
+    if (now - lastPulseTime < DEBOUNCE_US) return;
+
+    prevPulseInterval = pulseInterval;
+    pulseInterval     = now - lastPulseTime;
+    lastPulseTime     = now;
+
+    if (prevPulseInterval > 0 && pulseInterval < prevPulseInterval) {
+        float prev_rpm = 60.0f / (prevPulseInterval / 1000000.0f);
+        float curr_rpm = 60.0f / (pulseInterval     / 1000000.0f);
+        float spike    = curr_rpm - prev_rpm;
+
+        if (spike > RPM_SPIKE_TEST_THRESHOLD) {
+            spike_detected = true;
+        }
+    }
+}
+
+// Exact copy of get_rpm() from main firmware
+float get_rpm() {
+    noInterrupts();
+    unsigned long interval  = pulseInterval;
+    unsigned long lastPulse = lastPulseTime;
+    interrupts();
+    if (interval == 0) return 0.0f;
+    if (micros() - lastPulse > STALE_PULSE_US) return 0.0f;
+    return 60.0f / (interval / 1000000.0f);
+}
+
+void setup() {
+    Serial.begin(9600);
+
+    // FALLING edge - matches main firmware, accounts for optical isolation inversion.
+    // If RPM always reads 0 with sensor active, swap to RISING to diagnose inversion.
+    pinMode(IR_PIN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(IR_PIN), ir_interrupt, FALLING);
+
+    Serial.println("IR test ready.");
+    Serial.println("Interrupt mode: FALLING (optical isolation inverted)");
+    Serial.println("---");
+}
+
+void loop() {
+    float rpm = get_rpm();
+
+    Serial.print("RPM: ");
+    Serial.print(rpm, 1);
+
+    noInterrupts();
+    unsigned long interval = pulseInterval;
+    interrupts();
+
+    Serial.print("  |  Pulse interval (us): ");
+    Serial.print(interval);
+
+    if (spike_detected) {
+        Serial.print("  |  *** SPIKE DETECTED - load disconnect would trigger ***");
+        spike_detected = false;
+    }
+
+    Serial.println();
+    delay(250);
+}

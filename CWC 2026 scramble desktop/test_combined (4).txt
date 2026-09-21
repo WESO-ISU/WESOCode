@@ -1,0 +1,288 @@
+// test_combined.ino
+// Combined test script for LA, IR, and load functionality.
+// All logic is exact copies from main firmware.
+//
+// HOW TO USE:
+//   Open Serial Monitor at 9600 baud.
+//   Select a mode by entering its number:
+//     1 = LA control   - enter a duty cycle value (3816-3891)
+//     2 = RPM readout  - prints RPM for 5 seconds then returns to menu
+//     3 = Load control - enter a load byte value (0-255)
+//     4 = E-stop pin   - enter 1 for HIGH, 0 for LOW
+//   Type -1 at any time to return to the main menu.
+
+#include <stdint.h>
+
+// --- PIN DEFINITIONS ---
+const int LA_PIN  = 0;
+const int IR_PIN  = 1;
+
+const int LOAD_PIN1 = 2;
+const int LOAD_PIN2 = 3;
+const int LOAD_PIN3 = 4;
+const int LOAD_PIN4 = 5;
+const int LOAD_PIN5 = 6;
+const int LOAD_PIN6 = 7;
+const int LOAD_PIN7 = 8;
+const int LOAD_PIN8 = 9;
+
+// --- LA CONSTANTS ---
+const int LA_DUTY_RETRACT = 3816;
+const int LA_DUTY_EXTEND  = 3891;
+const int LA_DUTY_HOME    = (LA_DUTY_RETRACT + LA_DUTY_EXTEND) / 2;
+
+// --- LOAD CONSTANTS ---
+const bool LOAD_ACTIVE_HIGH = true; //#FLAG confirm with EE team
+const int LOAD_PINS[8] = {
+    LOAD_PIN8, LOAD_PIN7, LOAD_PIN6, LOAD_PIN5,
+    LOAD_PIN4, LOAD_PIN3, LOAD_PIN2, LOAD_PIN1
+};
+const float RESISTOR_VALUES[8] = { 1280.0f, 640.0f, 320.0f, 168.0f, 82.0f, 41.0f, 23.5f, 11.0f };
+
+// --- IR CONSTANTS ---
+const unsigned long DEBOUNCE_US    = 10000;
+const unsigned long STALE_PULSE_US = 2000000;
+const int           RPM_READ_MS    = 5000; // how long mode 2 reads before returning to menu
+
+// --- ESTOP PIN ---
+const int ESTOP_PIN  = 18;
+const int E_STOP_DUTY = 3891; // Braking angle - full extend
+
+// --- STATE ---
+int     current_mode    = 0; // 0 = menu, 1 = LA, 2 = RPM, 3 = load, 4 = estop
+int     la_current_duty = LA_DUTY_HOME;
+int     loadArray[8]    = {0, 0, 0, 0, 0, 0, 0, 0};
+
+volatile unsigned long lastPulseTime = 0;
+volatile unsigned long pulseInterval = 0;
+
+// --- IR INTERRUPT - exact copy from main firmware ---
+void ir_interrupt() {
+    unsigned long now = micros();
+    if (now - lastPulseTime < DEBOUNCE_US) return;
+    pulseInterval = now - lastPulseTime;
+    lastPulseTime = now;
+}
+
+// --- LA - exact copy from main firmware ---
+void la_write(int duty) {
+    duty = constrain(duty, LA_DUTY_RETRACT, LA_DUTY_EXTEND);
+    analogWriteResolution(12);
+    analogWriteFrequency(LA_PIN, 50);
+    analogWrite(LA_PIN, duty);
+    la_current_duty = duty;
+}
+
+// --- RPM - exact copy from main firmware ---
+float get_rpm() {
+    noInterrupts();
+    unsigned long interval  = pulseInterval;
+    unsigned long lastPulse = lastPulseTime;
+    interrupts();
+    if (interval == 0) return 0.0f;
+    if (micros() - lastPulse > STALE_PULSE_US) return 0.0f;
+    return 60.0f / (interval / 1000000.0f);
+}
+
+// --- LOAD - exact copies from main firmware ---
+// Bit ordering: LSB (bit 0) = 1280Ω, bit 1 = 640Ω, bit 2 = 320Ω ... bit 7 = 11Ω
+// So: 1 = 1280Ω only, 2 = 640Ω only, 3 = 1280+640Ω, 4 = 320Ω only, etc.
+void loadLoadArray(uint8_t loadValue) {
+    for (int i = 0; i < 8; i++) {
+        loadArray[i] = (loadValue >> i) & 1;
+    }
+}
+
+void loadLoad() {
+    for (int i = 0; i < 8; i++) {
+        bool activate = (loadArray[i] == 1);
+        digitalWrite(LOAD_PINS[i], (activate == LOAD_ACTIVE_HIGH) ? HIGH : LOW);
+    }
+}
+
+// --- LOAD HELPERS ---
+float compute_parallel_resistance() {
+    float conductance = 0.0f;
+    bool  any_on      = false;
+    for (int i = 0; i < 8; i++) {
+        if (loadArray[i] == 1) {
+            conductance += 1.0f / RESISTOR_VALUES[i];
+            any_on = true;
+        }
+    }
+    if (!any_on) return -1.0f;
+    return 1.0f / conductance;
+}
+
+void print_load_state(uint8_t loadValue) {
+    Serial.print("Load byte: 0b");
+    for (int i = 0; i < 8; i++) Serial.print((loadValue >> i) & 1);
+    Serial.print(" ("); Serial.print(loadValue); Serial.println(")");
+
+    Serial.print("Active resistors: ");
+    bool any = false;
+    for (int i = 0; i < 8; i++) {
+        if (loadArray[i] == 1) {
+            if (any) Serial.print(", ");
+            Serial.print(RESISTOR_VALUES[i]); Serial.print("Ω");
+            any = true;
+        }
+    }
+    if (!any) Serial.print("none (open circuit)");
+    Serial.println();
+
+    float r = compute_parallel_resistance();
+    if (r < 0) {
+        Serial.println("Expected resistance: open circuit");
+    } else {
+        Serial.print("Expected parallel resistance: ");
+        Serial.print(r, 4);
+        Serial.println("Ω  <-- verify with multimeter");
+    }
+    Serial.println("---");
+}
+
+// --- ESTOP - exact copy from main firmware, uses local E_STOP_DUTY ---
+void eStop() {
+    if (la_current_duty < E_STOP_DUTY) {
+        for (int i = la_current_duty; i < E_STOP_DUTY; i++) {
+            la_write(i);
+            delay(25);
+        }
+    } else {
+        for (int i = la_current_duty; i > E_STOP_DUTY; i--) {
+            la_write(i);
+            delay(25);
+        }
+    }
+}
+
+
+void print_menu() {
+    Serial.println("=== TEST MENU ===");
+    Serial.println("1 = LA control");
+    Serial.println("2 = RPM readout (5 seconds)");
+    Serial.println("3 = Load control");
+    Serial.println("4 = E-stop pin control");
+    Serial.println("-1 = Return to this menu");
+    Serial.println("=================");
+}
+
+void print_mode_prompt() {
+    switch (current_mode) {
+        case 1:
+            Serial.print("LA mode | current duty: "); Serial.println(la_current_duty);
+            Serial.print("Enter duty cycle ("); Serial.print(LA_DUTY_RETRACT);
+            Serial.print("-"); Serial.print(LA_DUTY_EXTEND); Serial.println(") or -1 for menu:");
+            break;
+        case 3:
+            Serial.println("Load mode | Enter load byte (0-255) or -1 for menu:");
+            break;
+        case 4:
+            Serial.println("E-stop mode | Press the e-stop button to trigger, or send -1 for menu:");
+            break;
+    }
+}
+
+// --- SETUP ---
+void setup() {
+    Serial.begin(9600);
+
+    pinMode(IR_PIN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(IR_PIN), ir_interrupt, FALLING);
+
+    pinMode(LA_PIN, OUTPUT);
+    la_write(LA_DUTY_HOME);
+
+    for (int i = 0; i < 8; i++) {
+        pinMode(LOAD_PINS[i], OUTPUT);
+        digitalWrite(LOAD_PINS[i], LOAD_ACTIVE_HIGH ? LOW : HIGH);
+    }
+
+    pinMode(ESTOP_PIN, INPUT_PULLUP);
+
+    Serial.println("Combined test ready.");
+    print_menu();
+}
+
+// --- LOOP ---
+void loop() {
+    // Mode 2 is handled here since it runs for a fixed duration
+    if (current_mode == 2) {
+        Serial.println("--- RPM readout start ---");
+        unsigned long start = millis();
+        while (millis() - start < RPM_READ_MS) {
+            Serial.print("RPM: "); Serial.println(get_rpm(), 1);
+            delay(250);
+        }
+        Serial.println("--- RPM readout end ---");
+        current_mode = 0;
+        print_menu();
+        return;
+    }
+
+    if (Serial.available() > 0) {
+        int input = Serial.parseInt();
+        while (Serial.available() > 0) Serial.read(); // flush newline
+
+        // Mode selection
+        if (current_mode == 0) {
+            if (input >= 1 && input <= 4) {
+                current_mode = input;
+                print_mode_prompt();
+            } else {
+                Serial.println("Invalid selection.");
+                print_menu();
+            }
+            return;
+        }
+
+        // Return to menu
+        if (input == -1) {
+            current_mode = 0;
+            Serial.println("Returning to menu.");
+            print_menu();
+            return;
+        }
+
+        // Mode actions
+        switch (current_mode) {
+            case 1: {
+                int duty = constrain(input, LA_DUTY_RETRACT, LA_DUTY_EXTEND);
+                la_write(duty);
+                Serial.print("LA moved to duty: "); Serial.println(la_current_duty);
+                print_mode_prompt();
+                break;
+            }
+            case 3: {
+                int val = constrain(input, 0, 255);
+                loadLoadArray((uint8_t)val);
+                loadLoad();
+                print_load_state((uint8_t)val);
+                print_mode_prompt();
+                break;
+            }
+            case 4: {
+                Serial.println("E-stop mode active. Press the e-stop button to trigger.");
+                Serial.println("Send -1 to return to menu.");
+                while (true) {
+                    if (Serial.available() > 0) {
+                        int val = Serial.parseInt();
+                        while (Serial.available() > 0) Serial.read();
+                        if (val == -1) break;
+                    }
+                    // Exact behavior from main firmware - LOW = button pressed
+                    if (digitalRead(ESTOP_PIN) == LOW) {
+                        Serial.println("E-stop triggered! Moving LA to braking angle (3891).");
+                        eStop();
+                        Serial.println("E-stop complete. Send -1 to return to menu.");
+                    }
+                    delay(50);
+                }
+                current_mode = 0;
+                print_menu();
+                break;
+            }
+        }
+    }
+}
